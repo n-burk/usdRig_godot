@@ -38,18 +38,27 @@ if env["platform"] == "windows":
 else:
     env.Append(CXXFLAGS=["-fno-fast-math", "-std=c++17"])
 
+# Same translation units as the rigExecBinary and rigExecRuntime STATIC
+# libraries in usdRig's CMakeLists.txt. The macOS link rejects undefined
+# symbols, so a unit those libraries compile cannot be left out here.
 runtime_sources = [
     "rigExecBinary/container.cpp",
+    "rigExecBinary/program.cpp",
+    "rigExecBinary/pose.cpp",
     "rigExecBinary/geometry.cpp",
     "rigExecBinary/inputTable.cpp",
-    "rigExecBinary/pose.cpp",
-    "rigExecBinary/program.cpp",
+    "rigExecBinary/external.cpp",
     "rigExecRuntime/open.cpp",
     "rigExecRuntime/exec.cpp",
     "rigExecRuntime/closure.cpp",
     "rigExecRuntime/publish.cpp",
     "rigExecRuntime/kernels.cpp",
     "rigExecRuntime/pose.cpp",
+    "rigExecRuntime/poseConstraints.cpp",
+    "rigExecRuntime/poseInterpolation.cpp",
+    "rigExecRuntime/poseMath.cpp",
+    "rigExecRuntime/poseSolvers.cpp",
+    "rigExecRuntime/poseSteps.cpp",
     "rigExecRuntime/geometry.cpp",
     "rigExecRuntime/weights.cpp",
 ]
