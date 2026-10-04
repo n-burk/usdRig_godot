@@ -1,0 +1,31 @@
+# SCons / compiler byproducts (never committed; CI rebuilds from scratch)
+.sconsign.dblite
+*.obj
+# Wavefront source mesh (not a compiler byproduct)
+!demo/ball_assets/tutorial_ball.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.exe
+
+# Built extension libraries (CI builds these on every push; install from
+# the rigexec-addon.zip workflow artifact or a release, not from git)
+addons/rigexec/bin/
+
+# Packaged addon zip (built by tools/package_addon.py in CI) and logs
+rigexec-addon.zip
+*.log
+
+# Regenerable demo intermediates (the setup scripts recreate these)
+build/
+demo/.godot/
+demo/addons/
+demo/captures/
+
+# Dev captures and recordings (working files, not part of the plugin)
+captures/
+
+# Python caches
+__pycache__/
+*.pyc

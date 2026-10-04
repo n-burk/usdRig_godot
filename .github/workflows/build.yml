@@ -1,0 +1,128 @@
+# Builds the rigExec GDExtension on Windows, Linux, and macOS (D5),
+# runs the no-USD-imports gate on every library, and assembles
+# rigexec-addon.zip.
+#
+# Layout: godot_rigExec is its own repo (godot-cpp a submodule at the
+# D5 pin); usdRig is checked out as a sibling from the repository named
+# by the USDRIG_REPO variable at USDRIG_REF (a branch, tag, or SHA).
+# Set both repository variables before enabling this workflow.
+#
+# The macOS leg is the mac verification path: no dev machine here is a
+# Mac, so win+linux are additionally gated headlessly on hardware (see
+# demo/check_verify.py) while mac is gated here at compile+link+import
+# level. The numeric headless gate needs a full USD build to bake its
+# goldens, which CI deliberately does not build.
+#
+# The 134/teardown quirk (see demo/setup_demo.sh) does not affect this
+# workflow: it runs no editor --import.
+name: godot-addon
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  API_VERSION: "4.7"
+  SCONS_VERSION: "4.11.1"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [template_debug, template_release]
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out godot_rigExec
+        uses: actions/checkout@v4
+        with:
+          path: godot_rigExec
+          submodules: recursive
+      - name: Check out usdRig sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.USDRIG_REPO }}
+          ref: ${{ vars.USDRIG_REF }}
+          path: usdRig
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install SCons
+        run: pip install "scons==${{ env.SCONS_VERSION }}"
+      - name: Set up MSVC
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build extension
+        working-directory: godot_rigExec
+        run: >
+          scons platform=${{ matrix.platform }}
+          target=${{ matrix.target }}
+          api_version=${{ env.API_VERSION }}
+      - name: No-USD-imports check (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: godot_rigExec
+        shell: cmd
+        run: >
+          tools\check_no_usd_imports.bat
+          addons\rigexec\bin\librigexec.windows.${{ matrix.target }}.x86_64.dll
+      - name: No-USD-imports check (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: godot_rigExec
+        shell: bash
+        run: >
+          bash tools/check_no_usd_imports.sh
+          addons/rigexec/bin/librigexec.linux.${{ matrix.target }}.x86_64.so
+      - name: No-USD-imports check (macOS)
+        if: matrix.platform == 'macos'
+        working-directory: godot_rigExec
+        shell: bash
+        run: >
+          bash tools/check_no_usd_imports.sh
+          "addons/rigexec/bin/librigexec.macos.${{ matrix.target }}.universal.framework/librigexec.macos.${{ matrix.target }}.universal"
+      - name: Upload library
+        uses: actions/upload-artifact@v4
+        with:
+          name: librigexec-${{ matrix.platform }}-${{ matrix.target }}
+          path: |
+            godot_rigExec/addons/rigexec/bin/librigexec.*.dll
+            godot_rigExec/addons/rigexec/bin/librigexec.*.so
+            godot_rigExec/addons/rigexec/bin/librigexec.*.framework
+          if-no-files-found: error
+
+  package:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out godot_rigExec
+        uses: actions/checkout@v4
+        with:
+          path: godot_rigExec
+      - name: Download libraries
+        uses: actions/download-artifact@v4
+        with:
+          path: libs
+      - name: Assemble and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=godot_rigExec/addons/rigexec/bin
+          mkdir -p "$BIN"
+          cp -r libs/librigexec-*/librigexec.* "$BIN/"
+          ls "$BIN"
+          python3 godot_rigExec/tools/package_addon.py \
+            --out rigexec-addon.zip godot_rigExec
+      - name: Upload addon zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: rigexec-addon-zip
+          path: rigexec-addon.zip
+          if-no-files-found: error

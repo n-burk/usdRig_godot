@@ -1,0 +1,13 @@
+[configuration]
+
+entry_symbol = "rigexec_library_init"
+compatibility_minimum = 4.7
+
+[libraries]
+
+windows.x86_64.debug = "bin/librigexec.windows.template_debug.x86_64.dll"
+windows.x86_64.release = "bin/librigexec.windows.template_release.x86_64.dll"
+linux.x86_64.debug = "bin/librigexec.linux.template_debug.x86_64.so"
+linux.x86_64.release = "bin/librigexec.linux.template_release.x86_64.so"
+macos.debug = "bin/librigexec.macos.template_debug.universal.framework"
+macos.release = "bin/librigexec.macos.template_release.universal.framework"

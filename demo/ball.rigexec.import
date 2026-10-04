@@ -1,0 +1,14 @@
+[remap]
+
+importer="rigexec.character"
+type="RigExecCharacter"
+uid="uid://due7pqoclvv2v"
+path="res://.godot/imported/ball.rigexec-6eb91c67eccb80940ff35d2bbfa5935e.res"
+
+[deps]
+
+source_file="res://ball.rigexec"
+dest_files=["res://.godot/imported/ball.rigexec-6eb91c67eccb80940ff35d2bbfa5935e.res"]
+
+[params]
+

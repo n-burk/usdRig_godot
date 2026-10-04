@@ -1,0 +1,14 @@
+[remap]
+
+importer="rigexec.character"
+type="RigExecCharacter"
+uid="uid://bjwrocb67tpir"
+path="res://.godot/imported/rolling_ball.rigexec-73f36c7adcdd9d27c3ab841de6154a31.res"
+
+[deps]
+
+source_file="res://rolling_ball.rigexec"
+dest_files=["res://.godot/imported/rolling_ball.rigexec-73f36c7adcdd9d27c3ab841de6154a31.res"]
+
+[params]
+

@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://rolling_game.gd" id="1"]
+[ext_resource type="PackedScene" path="res://rolling_ball.tscn" id="2"]
+
+[node name="RollingGame" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Ball" parent="." instance=ExtResource("2")]
+automatic_physics = false
