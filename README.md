@@ -50,9 +50,11 @@ committed.
 ## CI
 
 `.github/workflows/build.yml` builds the extension on Windows, Linux, and
-macos (debug + release), runs the no-USD-imports gate on every library, and
+macOS (debug + release), runs the no-USD-imports gate on every library, and
 assembles `rigexec-addon.zip`. It checks out this repo plus a sibling
 `usdRig` taken from the `USDRIG_REPO` / `USDRIG_REF` repository variables.
+Push a `v*` tag (`git tag v1.0.0 && git push origin v1.0.0`) to publish the
+zip as an asset on a GitHub release for that tag.
 
 ## License
 
