@@ -36,6 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [template_debug, template_release]
+        os: [windows-latest, ubuntu-24.04, macos-15]
         include:
           - os: windows-latest
             platform: windows

@@ -38,23 +38,16 @@ if env["platform"] == "windows":
 else:
     env.Append(CXXFLAGS=["-fno-fast-math", "-std=c++17"])
 
-runtime_sources = [
-    "rigExecBinary/container.cpp",
-    "rigExecBinary/geometry.cpp",
-    "rigExecBinary/inputTable.cpp",
-    "rigExecBinary/pose.cpp",
-    "rigExecBinary/program.cpp",
-    "rigExecRuntime/open.cpp",
-    "rigExecRuntime/exec.cpp",
-    "rigExecRuntime/closure.cpp",
-    "rigExecRuntime/publish.cpp",
-    "rigExecRuntime/kernels.cpp",
-    "rigExecRuntime/pose.cpp",
-    "rigExecRuntime/geometry.cpp",
-    "rigExecRuntime/weights.cpp",
-]
-
-sources = [os.path.join(usdrig, path) for path in runtime_sources]
+# Every translation unit in the zero-USD runtime libs. This must stay equal
+# to the rigExecBinary/rigExecRuntime source lists in usdRig's CMakeLists --
+# today that is all *.cpp directly in each dir (no mains or tests among
+# them; generated/ holds headers only and is not descended into). A static
+# list went stale as the runtime split files and failed only at link time,
+# so glob rather than enumerate. Forward slashes: SCons Glob patterns with
+# native Windows separators misbehave.
+usdrig_glob = usdrig.replace(os.sep, "/")
+sources = Glob(usdrig_glob + "/rigExecBinary/*.cpp")
+sources += Glob(usdrig_glob + "/rigExecRuntime/*.cpp")
 sources += Glob("addons/rigexec/src/*.cpp")
 
 if env["platform"] == "macos":
