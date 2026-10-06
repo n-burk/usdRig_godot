@@ -12,12 +12,13 @@ mesh/material/texture files are needed.
 rolling_ball.gd computes movement and accumulated rolling orientation. Its
 only rig inputs are Move.tx/ty/tz and Roll.rx/ry/rz, set through set_control().
 evaluate() executes the rig and updates its render geometry. reset_controls()
-restores baseline inputs. get_controls() lists authored public controls.
+returns every input to its bake-time default. get_controls() lists the
+authored public controls with their defaults and current values.
 
 The source wrapper declares rigExec:exposedAvars and rigExec:publicName on
 Move and Roll. Internal USD paths, joints, rest matrices and skinning remain
-encapsulated. The legacy skeleton adapter remains available for older
-program-only .rigexec files; this example does not use it.
+encapsulated. The skeleton adapter remains available for program-only
+.rigexec files; this example does not use it.
 
 The native renderer consumes rigExec's deformed points and baked OpenSubdiv
 limit/derivative stencils. Original face-varying UVs and texture bytes are
@@ -26,13 +27,15 @@ preserved. Materials use the authored diffuse 0.75, emission 0.5, roughness
 remain renderer-specific.
 
 Rebuild with sibling usdRig and usd-install, matching USD Python bindings,
-OpenSubdiv and a C++ toolchain. Close the Godot editor before setup.
+numpy in that Python, OpenSubdiv and a C++ toolchain. Close the Godot
+editor before setup.
 
     python demo/setup_rolling.py --build
 
-Omit --build when native libraries are current. Setup bakes the program,
-embeds presentation, installs the addon, imports, and verifies. Intermediate
-geometry files stay under build/rolling_ball, outside the Godot project.
+Omit --build when native libraries are current. Setup exports the
+presentation, then bakes the program with it embedded, installs the addon,
+imports, and verifies. Intermediate geometry files and presentation.rexp stay
+under build/rolling_ball, outside the Godot project.
 The exporter currently supports this tutorial's mesh/material graph.
 
     godot --headless --path demo --script verify_rolling.gd

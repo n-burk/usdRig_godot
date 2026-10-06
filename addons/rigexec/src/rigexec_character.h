@@ -1,6 +1,7 @@
 // RigExecCharacter: a Resource wrapping .rigexec bytes plus the binding the
-// player needs (joint paths in publication order). The editor import plugin
-// builds it from a .rigexec file; at runtime it is just bytes + metadata.
+// player needs (joint paths in publication order, from a run at the file's
+// input defaults). The editor import plugin builds it from a .rigexec file;
+// at runtime it is just bytes + metadata.
 
 #ifndef RIGEXEC_CHARACTER_H
 #define RIGEXEC_CHARACTER_H
@@ -30,7 +31,8 @@ public:
 
     // Joint paths in the binary's publication order, filled by bind().
     godot::PackedStringArray get_joint_paths() const;
-    godot::PackedFloat64Array get_frame_times() const;
+    // The time the file's input defaults were read at, filled by bind().
+    double get_bake_time() const;
 
     // Opens the bytes with the runtime and caches the binding. False with
     // the reason in get_bind_error() when the file is malformed.
@@ -41,7 +43,7 @@ public:
 private:
     godot::PackedByteArray _data;
     godot::PackedStringArray _joint_paths;
-    godot::PackedFloat64Array _frame_times;
+    double _bake_time = 0.0;
     godot::String _bind_error;
     bool _bound = false;
 };

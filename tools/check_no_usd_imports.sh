@@ -1,5 +1,5 @@
 #!/bin/sh
-# M4 import check (POSIX): the shipped runtime library must not import USD.
+# Import check (POSIX): the shipped runtime library must not import USD.
 # Usage: check_no_usd_imports.sh <librigexec....so|.dylib>
 # Exits 1 naming the first USD import found.
 set -u

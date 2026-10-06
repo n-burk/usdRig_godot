@@ -1,13 +1,16 @@
-> Current asset interface: the rolling-ball example uses embedded Presentation
-> section 13 and named public controllers. Its Godot scene has no skeleton.
-> The skeleton bridge described below remains a legacy program-only adapter.
+> Current asset interface: a `.rigexec` file is one FlatBuffer holding a
+> static exec graph and its inputs (attribute paths with bake-time defaults),
+> no animation; Godot drives the inputs. The rolling-ball example carries its
+> presentation as the nested buffer `File.presentation` (identifier REXP) and
+> exposes named public controllers. Its Godot scene has no skeleton. The
+> skeleton bridge described below remains the program-only adapter.
 > See ../usdRig/docs/specs/rigexec-presentation.md for the current contract.
 
 # Godot rigExec Runtime Plugin — Plan
 
-Status: complete through M4 on `feature/rigexec-binary-runtime`.
+Status: complete through M4; moved to the single-FlatBuffer `.rigexec`
+(usdRig format version 7), whose inputs Godot drives.
 Decisions D1–D7 locked (see below).
-Companion design doc (container format, APIs): `../usdRig/docs/plans/rigexec-binary-and-godot-runtime.md`.
 
 ## 1. Goal / non-goals
 
@@ -41,8 +44,9 @@ Companion design doc (container format, APIs): `../usdRig/docs/plans/rigexec-bin
 ## 3. Bake → load → execute flow
 
 1. Author/validate USD via `rigBuilder` + `MoverAPI`.
-2. `rigExecBake source.usdc --rig /path --frames a,b -o char.rigexec`
-   (extends the `rigExecPose` CLI pattern).
+2. `rigExecBake source.usdc --rig /path --time T [--presentation file.rexp]
+   -o char.rigexec` (extends the `rigExecPose` CLI pattern). Every input's
+   value at T becomes its default.
 3. Godot editor import: `.rigexec` → `RigExecCharacter` resource +
    skeleton/mesh binding. usdview: `RigExecRoot` asset attribute →
    imaging playback mode.
@@ -66,8 +70,8 @@ Companion design doc (container format, APIs): `../usdRig/docs/plans/rigexec-bin
   joints, all read phases. No refusal subset (remaining `Refuse` sites
   get implemented, not kept).
 - **D5 — Godot:** godot-cpp (pinned submodule), win + linux + mac.
-- **D6 — packaging:** single `.rigexec` file, no sidecar; diagnostics
-  are an optional embedded section the loader skips.
+- **D6 — packaging:** single `.rigexec` file, no sidecar; compile
+  diagnostics travel as a typed vector the runtime replays.
 - **D7 — playback select:** asset-path attribute on `RigExecRoot`;
   unset = live eval, set = baked playback.
 
@@ -76,11 +80,13 @@ Companion design doc (container format, APIs): `../usdRig/docs/plans/rigexec-bin
 - GDExtension (`godot-cpp`, 4.7.1): `addons/rigexec/` with
   `rigexec.gdextension`, `bin/<platform>/` runtime lib,
   `RigExecCharacter` (Resource wrapping `.rigexec` bytes + binding),
-  `RigExecPlayer` (Node3D: `character`, `frame`/`time`, `autoplay`,
-  `play`/`stop`/`set_frame`/`evaluate`/`apply_to_skeleton`).
-- Editor-only import plugin for `.rigexec`; re-bake shells out to
-  `tools/<platform>/rigExecBake` (needs `../usd-install` on dev
-  machines, never shipped).
+  `RigExecPlayer` (Node3D: `character`, `set_input`/`get_inputs`/
+  `reset_inputs`/`touch_animated_inputs`, `set_control`/`get_controls`/
+  `reset_controls`, `evaluate`, `apply_to_skeleton`). Nothing advances
+  on its own; the game sets inputs, then evaluates.
+- Editor-only import plugin for `.rigexec`; baking runs `rigExecBake`
+  outside the editor (needs `../usd-install` on dev machines, never
+  shipped).
 - Packaging: `rigexec-addon.zip`; sample under `demo/` with its own
   `project.godot` (no `project.godot` in the plugin root).
 - Transform mapping: row-major 16-float → `Transform3D`/`Basis`;

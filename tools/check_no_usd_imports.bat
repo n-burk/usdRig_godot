@@ -1,5 +1,5 @@
 @echo off
-rem M4 import check: the shipped runtime library must not import USD.
+rem Import check: the shipped runtime library must not import USD.
 rem Usage: check_no_usd_imports.bat ^<librigexec....dll^> [dumpbin]
 rem Exits 1 naming the first USD import found.
 setlocal

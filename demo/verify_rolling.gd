@@ -15,6 +15,30 @@ func check(value: bool, description: String) -> void:
 func close_basis(a: Basis, b: Basis) -> bool:
 	return a.x.distance_to(b.x) < 0.0001 and a.y.distance_to(b.y) < 0.0001 and a.z.distance_to(b.z) < 0.0001
 
+# The byte offset of the presentation's REXP identifier: the nested buffer
+# starts 16-aligned, its identifier sits 4 bytes in, and the u32 vector
+# length 8 bytes before the identifier covers the rest. -1 when absent.
+func nested_presentation_identifier(bytes: PackedByteArray) -> int:
+	var hex := bytes.hex_encode()
+	var at := hex.find("52455850")
+	while at >= 0:
+		var offset := at / 2
+		if at % 2 == 0 and offset % 16 == 4 and offset >= 8:
+			var length := bytes.decode_u32(offset - 8)
+			if length >= 8 and offset - 4 + length <= bytes.size():
+				return offset
+		at = hex.find("52455850", at + 1)
+	return -1
+
+# The byte offset of the first occurrence of ASCII text; -1 if none.
+func ascii_offset(bytes: PackedByteArray, text: String) -> int:
+	var hex := bytes.hex_encode()
+	var pattern := text.to_ascii_buffer().hex_encode()
+	var at := hex.find(pattern)
+	while at >= 0 and at % 2 != 0:
+		at = hex.find(pattern, at + 1)
+	return at / 2 if at >= 0 else -1
+
 func _initialize() -> void:
 	call_deferred("run")
 
@@ -25,7 +49,6 @@ func run() -> void:
 	var player := RigExecPlayer.new()
 	root.add_child(player)
 	player.set_character(character)
-	player.set_frame(1001)
 	check(player.evaluate(), "neutral pose evaluates")
 	var paths := character.get_joint_paths()
 	var tip := paths.find("/BallAsset/Rig/Joints/Root/Squash/Roll/Spin")
@@ -75,21 +98,30 @@ func run() -> void:
 			player.set_control(ROLL + ".r" + "xyz"[axis], euler[axis])
 		player.evaluate()
 		check(close_basis((player.get_joint_pose_transforms()[tip] as Transform3D).basis, Basis(q)), "exact Euler singularity preserves quaternion orientation")
-	player.clear_avars()
-	check(player.evaluate(), "cleared overrides evaluate")
+	player.reset_controls()
+	check(player.evaluate(), "reset controls evaluate")
 	var cleared: Transform3D = player.get_joint_pose_transforms()[tip]
-	check(close_basis(cleared.basis, neutral.basis) and cleared.origin.distance_to(neutral.origin) < 0.0001, "clear restores constant and sampled channels")
+	check(close_basis(cleared.basis, neutral.basis) and cleared.origin.distance_to(neutral.origin) < 0.0001, "reset restores the bake-time defaults")
 	check(player.get_child_count(true) == 1, "one internal render node, no skeleton hierarchy")
+	# A broken nested buffer: the runtime's open refuses the file.
 	var bad_bytes := character.get_data().duplicate()
-	for section in bad_bytes.decode_u32(8):
-		var entry := 16 + section * 20
-		if bad_bytes.decode_u32(entry) == 13:
-			var offset := bad_bytes.decode_u64(entry + 4)
-			bad_bytes[offset + 11] = 57 # Presentation JSON version 1 -> 9, same byte count.
+	var identifier := nested_presentation_identifier(bad_bytes)
+	if identifier >= 0:
+		bad_bytes[identifier] = 0x58 # "REXP" -> "XEXP"
 	var bad_character := RigExecCharacter.new()
 	bad_character.set_data(bad_bytes)
 	player.set_character(bad_character)
-	check(not player.evaluate() and not player.has_presentation(), "unsupported embedded version fails closed")
+	check(identifier >= 0 and not player.evaluate() and not player.has_presentation(), "corrupt embedded presentation fails closed")
+	# A well-formed presentation the extension does not support: the file
+	# opens, and the loader refuses it.
+	bad_bytes = character.get_data().duplicate()
+	var model := ascii_offset(bad_bytes, "UsdPreviewSurface")
+	if model >= 0:
+		bad_bytes[model] = 0x58 # "UsdPreviewSurface" -> "XsdPreviewSurface"
+	bad_character = RigExecCharacter.new()
+	bad_character.set_data(bad_bytes)
+	player.set_character(bad_character)
+	check(model >= 0 and not player.evaluate() and not player.has_presentation(), "unsupported material model fails closed")
 	player.set_character(character)
 	check(player.evaluate() and player.get_child_count(true) == 1, "replacing an asset rebuilds one clean render instance")
 	player.queue_free()
@@ -106,11 +138,13 @@ func run() -> void:
 		check(exposed.has(name) and not exposed[name].has("path"), "public controller metadata hides internal wiring")
 	var internal_property_visible := false
 	for property in game.ball.player.get_property_list():
-		if property.name in ["skeleton_path", "frame", "autoplay"] and property.usage & PROPERTY_USAGE_EDITOR:
+		if property.name == "skeleton_path" and property.usage & PROPERTY_USAGE_EDITOR:
 			internal_property_visible = true
-	check(not internal_property_visible, "inspector exposes controls, not skeleton/frame setup")
+		if property.name in ["frame", "autoplay"]:
+			internal_property_visible = true
+	check(not internal_property_visible, "inspector exposes controls, not skeleton setup")
 	check(not game.ball.player.set_control("Squash.sx", 2), "unexposed controllers rejected")
-	check(not game.ball.player.set_avar("/BallAsset/Rig/Controls/Move.avars:tx", 1), "internal USD paths cannot bypass public controls")
+	check(not game.ball.player.set_input("/BallAsset/Rig/Controls/Move.avars:tx", 1), "internal USD paths cannot bypass public controls")
 	var visual: MeshInstance3D = game.ball.player.get_children(true)[0]
 	check(visual.mesh is ArrayMesh, "ball object owns exported USD mesh, not a generated sphere")
 	check(visual.material_override is ShaderMaterial, "ball object owns the USD material translation")

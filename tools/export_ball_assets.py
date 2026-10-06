@@ -3,20 +3,33 @@
 
 This deliberately validates the ball's supported material graph, rather than
 silently approximating an arbitrary USD asset. USD/OpenSubdiv are build-only.
+It writes build/rolling_ball/presentation.rexp, the presentation buffer that
+`rigExecBake --presentation` embeds in rolling_ball.rigexec.
 """
 import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
-import base64
-import struct
+
+try:
+    import numpy as np  # FlatBuffers' CreateNumpyVector packs the tables.
+except ImportError:
+    sys.exit("export_ball_assets: numpy is required (pip install numpy)")
 
 PLUGIN = Path(__file__).resolve().parents[1]
 USD = PLUGIN.parent / "usd-install"
 RIG = PLUGIN.parent / "usdRig"
+# The vendored FlatBuffers runtime shadows any installed copy: the generated
+# builder code belongs to this exact release.
+sys.path.insert(0, str(PLUGIN / "tools/generated"))
+sys.path.insert(0, str(PLUGIN / "tools/thirdparty/flatbuffers/python"))
+import flatbuffers
+assert flatbuffers.__version__ == "25.12.19", flatbuffers.__version__
+from rigExec.fb import (Presentation, PresentationColor, PresentationControl,
+                        PresentationMaterial, PresentationMesh, PresentationUnit,
+                        PresentationWrap)
 DLL_HANDLES = []
 if os.name == "nt":
     for folder in (USD / "bin", USD / "lib"):
@@ -34,6 +47,105 @@ for finder in list(sys.meta_path):
     if spec and str(USD).lower() not in ((spec.origin or "") + str(spec.submodule_search_locations)).lower():
         sys.meta_path.remove(finder)
 from pxr import Gf, Usd, UsdGeom, UsdShade
+
+UNITS = {"t": PresentationUnit.PresentationUnit.AssetUnits,
+         "r": PresentationUnit.PresentationUnit.Degrees,
+         "s": PresentationUnit.PresentationUnit.Ratio}
+
+
+def table_vector(builder, start, tables):
+    start(builder, len(tables))
+    for table in reversed(tables):
+        builder.PrependUOffsetTRelative(table)
+    return builder.EndVector()
+
+
+def build_presentation(controls, mesh_path, points_path, point_count, stencils,
+                       render_vertices, render_uvs, png, diffuse, emission,
+                       params, manifest):
+    """The REXP buffer: controls name inputs of the baked file (which holds
+    their defaults); stencils are CSR, three groups (p, u, v) per vertex."""
+    offsets, indices, weights = [0], [], []
+    for record in stencils:
+        assert len(record) == 3
+        for group in record:
+            assert group and len(group) % 2 == 0
+            indices.extend(int(i) for i in group[0::2])
+            weights.extend(group[1::2])
+            offsets.append(len(indices))
+    builder = flatbuffers.Builder(0)
+    control_tables = []
+    for name, input_path, unit in controls:
+        name_offset = builder.CreateString(name)
+        input_offset = builder.CreateString(input_path)
+        PresentationControl.PresentationControlStart(builder)
+        PresentationControl.PresentationControlAddName(builder, name_offset)
+        PresentationControl.PresentationControlAddInput(builder, input_offset)
+        PresentationControl.PresentationControlAddUnit(builder, unit)
+        control_tables.append(PresentationControl.PresentationControlEnd(builder))
+    controls_vector = table_vector(builder, Presentation.PresentationStartControlsVector, control_tables)
+    model = builder.CreateString("UsdPreviewSurface")
+    texture_png = builder.CreateByteVector(png)
+    PresentationMaterial.PresentationMaterialStart(builder)
+    PresentationMaterial.PresentationMaterialAddModel(builder, model)
+    PresentationMaterial.PresentationMaterialAddTexturePng(builder, texture_png)
+    PresentationMaterial.PresentationMaterialAddDiffuseScale(
+        builder, PresentationColor.CreatePresentationColor(builder, *diffuse[:3]))
+    PresentationMaterial.PresentationMaterialAddEmissionScale(
+        builder, PresentationColor.CreatePresentationColor(builder, *emission[:3]))
+    PresentationMaterial.PresentationMaterialAddRoughness(builder, params["roughness"])
+    PresentationMaterial.PresentationMaterialAddMetallic(builder, params["metallic"])
+    PresentationMaterial.PresentationMaterialAddSpecular(builder, params["specular"])
+    PresentationMaterial.PresentationMaterialAddWrapS(builder, PresentationWrap.PresentationWrap.Repeat)
+    PresentationMaterial.PresentationMaterialAddWrapT(builder, PresentationWrap.PresentationWrap.Clamp)
+    material = PresentationMaterial.PresentationMaterialEnd(builder)
+    path_offset = builder.CreateString(mesh_path)
+    points_offset = builder.CreateString(points_path)
+    offsets_vector = builder.CreateNumpyVector(np.asarray(offsets, dtype=np.uint32))
+    narrow = point_count <= 65535
+    indices_vector = builder.CreateNumpyVector(
+        np.asarray(indices, dtype=np.uint16 if narrow else np.uint32))
+    weights_vector = builder.CreateNumpyVector(np.asarray(weights, dtype=np.float32))
+    vertices_vector = builder.CreateNumpyVector(np.asarray(render_vertices, dtype=np.uint32))
+    uvs_vector = builder.CreateNumpyVector(np.asarray(render_uvs, dtype=np.float32))
+    PresentationMesh.PresentationMeshStart(builder)
+    PresentationMesh.PresentationMeshAddPath(builder, path_offset)
+    PresentationMesh.PresentationMeshAddPointsPath(builder, points_offset)
+    PresentationMesh.PresentationMeshAddSourcePointCount(builder, point_count)
+    PresentationMesh.PresentationMeshAddStencilOffsets(builder, offsets_vector)
+    if narrow:
+        PresentationMesh.PresentationMeshAddStencilIndices16(builder, indices_vector)
+    else:
+        PresentationMesh.PresentationMeshAddStencilIndices32(builder, indices_vector)
+    PresentationMesh.PresentationMeshAddStencilWeights(builder, weights_vector)
+    PresentationMesh.PresentationMeshAddVertexIndices(builder, vertices_vector)
+    PresentationMesh.PresentationMeshAddUvs(builder, uvs_vector)
+    PresentationMesh.PresentationMeshAddMaterial(builder, material)
+    mesh = PresentationMesh.PresentationMeshEnd(builder)
+    meshes_vector = table_vector(builder, Presentation.PresentationStartMeshesVector, [mesh])
+    source_json = builder.CreateString(
+        json.dumps(manifest, separators=(",", ":"), allow_nan=False))
+    Presentation.PresentationStart(builder)
+    Presentation.PresentationAddVersion(builder, 1)
+    Presentation.PresentationAddControls(builder, controls_vector)
+    Presentation.PresentationAddMeshes(builder, meshes_vector)
+    Presentation.PresentationAddSourceJson(builder, source_json)
+    root = Presentation.PresentationEnd(builder)
+    builder.Finish(root, file_identifier=b"REXP")
+    data = bytes(builder.Output())
+    # Read back what a loader reads.
+    assert Presentation.Presentation.PresentationBufferHasIdentifier(data, 0)
+    check = Presentation.Presentation.GetRootAs(data, 0)
+    assert check.Version() == 1 and check.ControlsLength() == len(controls)
+    assert check.MeshesLength() == 1
+    stored = check.Meshes(0)
+    assert stored.StencilOffsetsLength() == 3 * len(stencils) + 1
+    assert stored.StencilWeightsLength() == len(weights)
+    assert (stored.StencilIndices16Length() if narrow else stored.StencilIndices32Length()) == len(indices)
+    assert stored.VertexIndicesLength() == len(render_vertices)
+    assert stored.UvsLength() == len(render_uvs)
+    assert stored.Material().TexturePngLength() == len(png)
+    return data
 
 
 def main():
@@ -107,25 +219,9 @@ def main():
     subprocess.run([str(tool), str(source_mesh), str(assets / "tutorial_ball.obj"),
                     str(assets / "tutorial_ball.stencils.json")], check=True)
     texture = Path(inputs["diffuseColor"]["texture"])
-    shutil.copy2(texture, assets / texture.name)
     params = {name: surface.GetInput(name).Get() for name in ("metallic", "roughness", "specular")}
     diffuse = inputs["diffuseColor"]["scale"]
     emission = inputs["emissiveColor"]["scale"]
-    material_text = '''[gd_resource type="ShaderMaterial" load_steps=3 format=3]
-
-[ext_resource type="Shader" path="res://ball_assets/tutorial_ball.gdshader" id="1"]
-[ext_resource type="Texture2D" path="res://ball_assets/pixar_ball.png" id="2"]
-
-[resource]
-resource_name = "BallMaterial (USD Preview Surface)"
-shader = ExtResource("1")
-shader_parameter/ball_texture = ExtResource("2")
-'''
-    material_text += f'shader_parameter/diffuse_scale = Vector3({", ".join(map(str, diffuse[:3]))})\n'
-    material_text += f'shader_parameter/emission_scale = Vector3({", ".join(map(str, emission[:3]))})\n'
-    for name, value in params.items():
-        material_text += f"shader_parameter/{name} = {value}\n"
-    (assets / "tutorial_ball_material.tres").write_text(material_text)
     manifest = dict(source="usdRig/docs/examples/tutorial_rolling_ball_free.usda", prim=str(mesh.GetPath()),
                     material=str(material.GetPath()), points=len(points), faces=len(counts),
                     corners=len(indices), uv_interpolation=str(st.GetInterpolation()),
@@ -134,8 +230,8 @@ shader_parameter/ball_texture = ExtResource("2")
                     texture_sha256=hashlib.sha256(texture.read_bytes()).hexdigest(),
                     diffuse_scale=diffuse, emission_scale=emission, **params)
     (assets / "source_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    # Presentation is an optional, versioned section of the same REXB file.
-    # OBJ/material files above are bake intermediates; none is loaded by Godot.
+    # The OBJ and stencil files above are bake intermediates; Godot loads
+    # only the presentation embedded in the .rigexec.
     vertices, normals, texcoords, faces = [], [], [], []
     for line in (assets / "tutorial_ball.obj").read_text().splitlines():
         fields = line.split()
@@ -162,37 +258,18 @@ shader_parameter/ball_texture = ExtResource("2")
         for channel in exposed:
             assert channel in ("tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz")
             attr = prim.GetAttribute("avars:" + channel)
-            controls.append(dict(name=public + "." + channel, path=str(attr.GetPath()),
-                                 default=attr.Get(Usd.TimeCode(1001)),
-                                 unit="degrees" if channel.startswith('r') else
-                                 "asset_units" if channel.startswith('t') else "ratio"))
-    assert controls and len({c['name'] for c in controls}) == len(controls)
-    presentation = dict(version=1, controls=controls, meshes=[dict(
-        path=str(mesh.GetPath()), points_path=str(mesh.GetPointsAttr().GetPath()),
-        source_point_count=len(points),
-        stencils=json.loads((assets / "tutorial_ball.stencils.json").read_text()),
-        vertex_indices=render_vertices, uvs=render_uvs,
-        material=dict(model="UsdPreviewSurface", texture_png=base64.b64encode(texture.read_bytes()).decode('ascii'),
-                      diffuse_scale=diffuse[:3], emission_scale=emission[:3],
-                      wrap_s="repeat", wrap_t="clamp", **params))], source=manifest)
-    target = PLUGIN / "demo/rolling_ball.rigexec"
-    data = target.read_bytes()
-    magic, version, count, flags = struct.unpack_from('<4sIII', data)
-    assert magic == b'REXB' and version & 65535 == 1
-    sections = []
-    for i in range(count):
-        tag, offset, size = struct.unpack_from('<IQQ', data, 16+i*20)
-        if tag != 13:
-            sections.append((tag, data[offset:offset+size]))
-    sections.append((13, json.dumps(presentation, separators=(',', ':'), allow_nan=False).encode('utf-8')))
-    offset = 16 + len(sections)*20
-    table = bytearray()
-    for tag, payload in sections:
-        table.extend(struct.pack('<IQQ', tag, offset, len(payload)))
-        offset += len(payload)
-    result = struct.pack('<4sIII', magic, version, len(sections), flags) + table + b''.join(p for _, p in sections)
-    target.write_bytes(result)
-    print(f"Embedded mesh, subdivision stencils, material, PNG and {len(controls)} public controls in {target.name}")
+            controls.append((public + "." + channel, str(attr.GetPath()), UNITS[channel[0]]))
+    assert controls and len({name for name, _, _ in controls}) == len(controls)
+    stencils = json.loads((assets / "tutorial_ball.stencils.json").read_text())
+    assert len(stencils) == len(vertices)
+    data = build_presentation(
+        controls, str(mesh.GetPath()), str(mesh.GetPointsAttr().GetPath()), len(points),
+        stencils, render_vertices, render_uvs, texture.read_bytes(), diffuse, emission,
+        params, manifest)
+    target = assets / "presentation.rexp"
+    target.write_bytes(data)
+    print(f"Wrote mesh, subdivision stencils, material, PNG and {len(controls)} public controls "
+          f"to {target.name} ({len(data):,} bytes); rigExecBake --presentation embeds it")
     print(f"Exported {len(points)} source points, {len(counts)} faces, original st UVs and {material.GetPath()}")
 
 

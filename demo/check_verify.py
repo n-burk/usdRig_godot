@@ -2,18 +2,20 @@
 """Headless Godot gate: the player's joint transforms equal the baked path.
 
 Runs demo/verify.gd under headless Godot and rigExecPose --pose-out over
-the same stage and frames, then compares joint by joint. The extension
-publishes Transform3D (float), so each printed value must equal the
-golden double rounded exactly once to float -- bitwise, not within a
-tolerance. A tolerance would let a second rounding (or a wrong matrix)
-hide inside the epsilon.
+the same stage and frames, then compares joint by joint. verify.gd plays
+frame 1001 from fk.rigexec's input defaults and frame 1002 by setting its
+animated inputs to fk_1002.rigexec's defaults (the same stage baked at
+1002). The extension publishes Transform3D (float), so each printed value
+must equal the golden double rounded exactly once to float -- bitwise,
+not within a tolerance. A tolerance would let a second rounding (or a
+wrong matrix) hide inside the epsilon.
 
 Usage: check_verify.py [demo-dir] [usdrig-build-dir]
    or: check_verify.py --compare-only <run.txt> <golden.txt>
 The second form skips both subprocesses and only compares texts, which
 is how a Linux run (no Linux USD build to bake or dump with) is checked
-against the Windows-produced golden: the .rigexec bytes and the golden
-text are both platform-independent.
+against the Windows-produced golden: both .rigexec files and the golden
+text are platform-independent.
 Exit 0 on match; exit 1 naming the first mismatch.
 """
 

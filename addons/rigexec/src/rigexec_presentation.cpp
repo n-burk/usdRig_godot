@@ -1,50 +1,70 @@
 #include "rigexec_player.h"
 #include "rigexec_character.h"
 #include "rigExecRuntime/runtime.h"
+// The presentation schema; its generated header needs format.h's types.
+#include "rigExecBinary/format.h"
+#include "flatbuffers/verifier.h"
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/json.hpp>
-#include <godot_cpp/classes/marshalls.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <algorithm>
+#include <vector>
 
 namespace rigexec {
 using namespace godot;
+
+namespace {
+
+// A control's input is a Double or a Float.
+double ScalarValue(const rigExec::RrInputValue &value) {
+    return value.tag == rigExec::RrInputTag::Float ? double(value.f32) : value.f64;
+}
+
+} // namespace
 
 void RigExecPlayer::_clear_presentation() {
     for (auto &v : _visuals) {
         if (v.node) { remove_child(v.node); memdelete(v.node); }
     }
     _visuals.clear();
-    _controls.clear(); _control_values.clear(); _source_info.clear();
+    _controls.clear(); _control_slots.clear(); _source_info.clear();
     _has_presentation = false;
 }
 
 bool RigExecPlayer::set_control(const String &name, double value) {
-    if (!_controls.has(name) || !std::isfinite(value)) {
+    if (!_control_slots.has(name) || !std::isfinite(value)) {
         _last_error = "Expected a finite value for an exposed controller: " + name;
         return false;
     }
     if (!_ensure_reader(&_last_error)) return false;
-    const Dictionary entry = _controls[name];
-    const String path = entry["path"];
+    const Control &control = _controls[size_t(int64_t(_control_slots[name]))];
+    rigExec::RrInputValue held{};
+    held.tag = rigExec::RrInputTag::Double;
+    held.f64 = value;
     std::string why;
-    if (!_reader->SetAvar(path.utf8().get_data(), value, &why)) {
+    if (!_reader->SetInputAt(control.input, held, &why)) {
         _last_error = String(why.c_str()); return false;
     }
-    _control_values[name] = value;
     _last_error = "";
     return true;
 }
 
 Dictionary RigExecPlayer::get_controls() const {
     Dictionary result;
-    for (const auto &key : _controls.keys()) {
-        Dictionary metadata = Dictionary(_controls[key]).duplicate(true);
-        metadata.erase("path"); // Internal USD wiring is not the game interface.
-        metadata["value"] = _control_values[key];
-        result[key] = metadata;
+    if (!_reader) return result;
+    // Defaults and values come from the file's inputs; the input path is
+    // internal wiring, not the game interface.
+    for (const Control &control : _controls) {
+        Dictionary metadata;
+        metadata["name"] = control.name;
+        metadata["default"] = ScalarValue(_reader->GetInputInfo(control.input).defaultValue);
+        metadata["unit"] = control.unit;
+        metadata["value"] = ScalarValue(_reader->GetInputValue(control.input));
+        result[control.name] = metadata;
     }
     return result;
 }
@@ -59,17 +79,18 @@ bool RigExecPlayer::_set(const StringName &name, const Variant &value) {
 bool RigExecPlayer::_get(const StringName &name, Variant &value) const {
     const String n(name);
     const String key = n.substr(9).replace("/", ".");
-    if (!n.begins_with("controls/") || !_control_values.has(key)) return false;
-    value = _control_values[key]; return true;
+    if (!n.begins_with("controls/") || !_control_slots.has(key) || !_reader) return false;
+    const Control &control = _controls[size_t(int64_t(_control_slots[key]))];
+    value = ScalarValue(_reader->GetInputValue(control.input)); return true;
 }
 
 void RigExecPlayer::_get_property_list(List<PropertyInfo> *list) const {
-    for (const auto &key : _controls.keys())
-        list->push_back(PropertyInfo(Variant::FLOAT, "controls/" + String(key).replace(".", "/")));
+    for (const Control &control : _controls)
+        list->push_back(PropertyInfo(Variant::FLOAT, "controls/" + control.name.replace(".", "/")));
 }
 
 void RigExecPlayer::_validate_property(PropertyInfo &p) const {
-    if (_has_presentation && (String(p.name) == "skeleton_path" || String(p.name) == "frame" || String(p.name) == "autoplay"))
+    if (_has_presentation && String(p.name) == "skeleton_path")
         p.usage = PROPERTY_USAGE_STORAGE;
 }
 
@@ -77,76 +98,106 @@ bool RigExecPlayer::_load_presentation() {
     auto fail = [&](const String &reason) {
         _clear_presentation(); _last_error = "Invalid embedded presentation: " + reason; return false;
     };
-    const PackedByteArray bytes = _character->get_data();
-    std::string why;
-    auto binary = rigExec::RigExecBinaryReader::Open(bytes.ptr(), bytes.size(), &why);
-    if (!binary) return fail(String(why.c_str()));
-    const uint8_t *data = nullptr; size_t size = 0;
-    if (!binary->FindSection(rigExec::RigExecBinarySection::Presentation, &data, &size)) return true;
-    Ref<JSON> parser; parser.instantiate();
-    if (parser->parse(String::utf8(reinterpret_cast<const char *>(data), size)) != OK ||
-        parser->get_data().get_type() != Variant::DICTIONARY) return fail("JSON payload");
-    const Dictionary asset = parser->get_data();
-    if (int(asset.get("version", 0)) != 1 ||
-        asset.get("controls", Variant()).get_type() != Variant::ARRAY ||
-        asset.get("meshes", Variant()).get_type() != Variant::ARRAY) return fail("version or tables");
-    const Array controls = asset["controls"];
-    for (const Variant &item : controls) {
-        if (item.get_type() != Variant::DICTIONARY) return fail("controller record");
-        const Dictionary c = item;
-        const String name = c.get("name", ""), path = c.get("path", "");
-        if (name.is_empty() || name.contains("/") || _controls.has(name) || !c.has("default"))
-            return fail("controller name/default");
-        if (!_reader->SetAvar(path.utf8().get_data(), double(c["default"]), &why)) return fail(String(why.c_str()));
-        _controls[name] = c; _control_values[name] = c["default"];
+    // The reader opened _data, which verified the file's root and bounded
+    // and verified its nested presentation.
+    const rigExec::fb::File *file = rigExec::fb::GetFile(_data.ptr());
+    const flatbuffers::Vector<uint8_t> *nested = file->presentation();
+    if (!nested || nested->size() == 0) return true;
+    // An owned copy keeps every read aligned whatever the byte array's
+    // alignment; it is verified again on its own.
+    const std::vector<uint8_t> buffer(nested->data(), nested->data() + nested->size());
+    flatbuffers::Verifier verifier(buffer.data(), buffer.size());
+    if (!rigExec::fb::VerifyPresentationBuffer(verifier)) return fail("REXP buffer");
+    const rigExec::fb::Presentation *asset = rigExec::fb::GetPresentation(buffer.data());
+    if (asset->version() != 1) return fail("version");
+    if (const auto *controls = asset->controls()) {
+        for (const rigExec::fb::PresentationControl *c : *controls) {
+            const String name = String::utf8(c->name()->c_str(), int(c->name()->size()));
+            if (name.is_empty() || name.contains("/") || _control_slots.has(name))
+                return fail("controller name");
+            size_t input = 0;
+            if (!_reader->FindInput(c->input()->str(), &input))
+                return fail("control input " + String::utf8(c->input()->c_str()));
+            const rigExec::RrInputTag type = _reader->GetInputInfo(input).type;
+            if (type != rigExec::RrInputTag::Double && type != rigExec::RrInputTag::Float)
+                return fail("control input type");
+            const char *unit = nullptr;
+            switch (c->unit()) {
+            case rigExec::fb::PresentationUnit::AssetUnits: unit = "asset_units"; break;
+            case rigExec::fb::PresentationUnit::Degrees: unit = "degrees"; break;
+            case rigExec::fb::PresentationUnit::Ratio: unit = "ratio"; break;
+            }
+            if (!unit) return fail("control unit");
+            _control_slots[name] = int64_t(_controls.size());
+            _controls.push_back({name, input, unit});
+        }
     }
-    _reader->ClearAvars();
-    const Array meshes = asset["meshes"];
-    if (meshes.is_empty()) return fail("no render meshes");
-    for (const Variant &item : meshes) {
-        if (item.get_type() != Variant::DICTIONARY) return fail("mesh record");
-        const Dictionary m = item;
-        if (m.get("stencils", Variant()).get_type() != Variant::ARRAY ||
-            m.get("vertex_indices", Variant()).get_type() != Variant::ARRAY ||
-            m.get("uvs", Variant()).get_type() != Variant::ARRAY ||
-            m.get("material", Variant()).get_type() != Variant::DICTIONARY) return fail("mesh tables");
+    const auto *meshes = asset->meshes();
+    if (!meshes || meshes->size() == 0) return fail("no render meshes");
+    for (const rigExec::fb::PresentationMesh *m : *meshes) {
         Visual visual;
-        visual.points_path = String(m.get("points_path", "")).utf8().get_data();
-        visual.source_count = m.get("source_point_count", 0);
-        if (visual.source_count <= 0 || visual.points_path.empty()) return fail("point binding");
-        const Array stencils = m["stencils"];
-        for (const Variant &record : stencils) {
-            if (record.get_type() != Variant::ARRAY || Array(record).size() != 3) return fail("stencil record");
-            const Array groups = record; Stencil s;
+        visual.points_path = m->pointsPath()->str();
+        const uint32_t source_count = m->sourcePointCount();
+        if (source_count == 0 || source_count > uint32_t(INT32_MAX) || visual.points_path.empty())
+            return fail("point binding");
+        visual.source_count = int(source_count);
+        // CSR stencils: three groups (p, u, v) per render vertex.
+        const auto *offsets = m->stencilOffsets();
+        const auto *weights = m->stencilWeights();
+        const auto *indices16 = m->stencilIndices16();
+        const auto *indices32 = m->stencilIndices32();
+        if (!offsets || !weights || (indices16 == nullptr) == (indices32 == nullptr))
+            return fail("stencil tables");
+        const size_t entries = indices16 ? indices16->size() : indices32->size();
+        if (entries != weights->size() || (indices16 != nullptr) != (source_count <= 65535))
+            return fail("stencil indices");
+        if (offsets->size() < 4 || (offsets->size() - 1) % 3 != 0 || offsets->Get(0) != 0 ||
+            offsets->Get(offsets->size() - 1) != entries)
+            return fail("stencil offsets");
+        const size_t vertex_count = (offsets->size() - 1) / 3;
+        visual.stencils.resize(vertex_count);
+        for (size_t i = 0; i < vertex_count; ++i) {
+            Stencil &s = visual.stencils[i];
             std::vector<Coefficient> *dest[] = {&s.p, &s.u, &s.v};
-            for (int group = 0; group < 3; ++group) {
-                if (groups[group].get_type() != Variant::ARRAY) return fail("stencil group");
-                const Array weights = groups[group];
-                if (weights.is_empty() || weights.size() % 2) return fail("stencil length");
-                for (int k = 0; k < weights.size(); k += 2) {
-                    double index = weights[k], w = weights[k+1];
-                    if (!std::isfinite(index) || index != std::floor(index) || index < 0 || index >= visual.source_count || !std::isfinite(w))
-                        return fail("stencil coefficient");
-                    dest[group]->push_back({int(index), float(w)});
+            for (size_t group = 0; group < 3; ++group) {
+                const uint32_t begin = offsets->Get(uint32_t(3 * i + group));
+                const uint32_t end = offsets->Get(uint32_t(3 * i + group + 1));
+                if (end <= begin || end > entries) return fail("stencil group");
+                dest[group]->reserve(end - begin);
+                for (uint32_t k = begin; k < end; ++k) {
+                    const uint32_t index = indices16 ? indices16->Get(k) : indices32->Get(k);
+                    const float w = weights->Get(k);
+                    if (index >= source_count || !std::isfinite(w)) return fail("stencil coefficient");
+                    dest[group]->push_back({int(index), w});
                 }
             }
-            visual.stencils.push_back(std::move(s));
         }
-        const Array indices = m["vertex_indices"], uv = m["uvs"];
-        if (indices.is_empty() || indices.size() % 3 || uv.size() != 2*indices.size()) return fail("triangle/UV count");
-        visual.uvs.resize(indices.size());
-        for (int i = 0; i < indices.size(); ++i) {
-            const double vi = indices[i], u = uv[2*i], v = uv[2*i+1];
-            if (!std::isfinite(vi) || vi != std::floor(vi) || vi < 0 || vi >= visual.stencils.size() || !std::isfinite(u) || !std::isfinite(v))
+        const auto *vertices = m->vertexIndices();
+        const auto *uv = m->uvs();
+        if (!vertices || !uv || vertices->size() == 0 || vertices->size() % 3 ||
+            uv->size() != 2 * size_t(vertices->size()))
+            return fail("triangle/UV count");
+        visual.uvs.resize(vertices->size());
+        visual.vertices.reserve(vertices->size());
+        Vector2 *uvs = visual.uvs.ptrw();
+        for (uint32_t i = 0; i < vertices->size(); ++i) {
+            const uint32_t vi = vertices->Get(i);
+            const float u = uv->Get(2 * i), v = uv->Get(2 * i + 1);
+            if (vi >= vertex_count || !std::isfinite(u) || !std::isfinite(v))
                 return fail("triangle/UV value");
-            visual.vertices.push_back(int(vi)); visual.uvs.set(i, Vector2(u, v));
+            visual.vertices.push_back(int(vi)); uvs[i] = Vector2(u, v);
         }
-        const Dictionary material = m["material"];
-        if (String(material.get("model", "")) != "UsdPreviewSurface" ||
-            String(material.get("wrap_s", "")) != "repeat" || String(material.get("wrap_t", "")) != "clamp")
+        const rigExec::fb::PresentationMaterial *material = m->material();
+        if (!material || !material->model() || material->model()->str() != "UsdPreviewSurface" ||
+            material->wrapS() != rigExec::fb::PresentationWrap::Repeat ||
+            material->wrapT() != rigExec::fb::PresentationWrap::Clamp)
             return fail("unsupported material model/wrap");
+        const auto *png_bytes = material->texturePng();
+        if (!png_bytes || png_bytes->size() == 0) return fail("embedded PNG");
+        PackedByteArray png;
+        png.resize(png_bytes->size());
+        std::memcpy(png.ptrw(), png_bytes->data(), png_bytes->size());
         Ref<Image> texture; texture.instantiate();
-        PackedByteArray png = Marshalls::get_singleton()->base64_to_raw(material.get("texture_png", ""));
         if (texture->load_png_from_buffer(png) != OK) return fail("embedded PNG");
         texture->generate_mipmaps();
         Ref<Shader> shader; shader.instantiate();
@@ -169,16 +220,21 @@ void fragment() {
 })");
         visual.material.instantiate(); visual.material->set_shader(shader);
         visual.material->set_shader_parameter("ball_texture", ImageTexture::create_from_image(texture));
-        for (const char *key : {"diffuse_scale", "emission_scale"}) {
-            if (material.get(key, Variant()).get_type() != Variant::ARRAY || Array(material[key]).size() != 3) return fail("material color");
-            const Array c = material[key];
-            for (const Variant &v : c) if (!std::isfinite(double(v))) return fail("material color value");
-            visual.material->set_shader_parameter(key, Vector3(c[0], c[1], c[2]));
+        const rigExec::fb::PresentationColor *colors[] = {material->diffuseScale(), material->emissionScale()};
+        const char *color_keys[] = {"diffuse_scale", "emission_scale"};
+        for (int k = 0; k < 2; ++k) {
+            const rigExec::fb::PresentationColor *c = colors[k];
+            if (!c) return fail("material color");
+            if (!std::isfinite(c->r()) || !std::isfinite(c->g()) || !std::isfinite(c->b()))
+                return fail("material color value");
+            visual.material->set_shader_parameter(color_keys[k], Vector3(c->r(), c->g(), c->b()));
         }
-        for (const char *key : {"roughness", "metallic", "specular"}) {
-            const double v = material.get(key, -1);
+        const float scalars[] = {material->roughness(), material->metallic(), material->specular()};
+        const char *scalar_keys[] = {"roughness", "metallic", "specular"};
+        for (int k = 0; k < 3; ++k) {
+            const double v = scalars[k];
             if (!std::isfinite(v) || v < 0 || v > 1) return fail("material scalar");
-            visual.material->set_shader_parameter(key, v);
+            visual.material->set_shader_parameter(scalar_keys[k], v);
         }
         visual.mesh.instantiate(); visual.node = memnew(MeshInstance3D);
         visual.node->set_name("RigExecGeometry" + String::num_int64(_visuals.size()));
@@ -186,7 +242,14 @@ void fragment() {
         add_child(visual.node, false, Node::INTERNAL_MODE_BACK);
         _visuals.push_back(std::move(visual));
     }
-    _source_info = asset.get("source", Dictionary());
+    _source_info = Dictionary();
+    const flatbuffers::String *source = asset->sourceJson();
+    if (source && source->size() > 0) {
+        Ref<JSON> parser; parser.instantiate();
+        if (parser->parse(String::utf8(source->c_str(), int(source->size()))) != OK ||
+            parser->get_data().get_type() != Variant::DICTIONARY) return fail("source description");
+        _source_info = parser->get_data();
+    }
     _has_presentation = true;
     return true;
 }
@@ -194,15 +257,22 @@ void fragment() {
 bool RigExecPlayer::_update_presentation() {
     const auto &outputs = _reader->GetPoints();
     for (auto &v : _visuals) {
-        const auto output = std::find_if(outputs.begin(), outputs.end(), [&](const auto &p) { return p.path == v.points_path; });
-        if (output == outputs.end() || output->points.size() != size_t(v.source_count)) {
+        // The output list is fixed per file; the cached slot is found again
+        // only if its path ever differs.
+        if (v.points_output < 0 || size_t(v.points_output) >= outputs.size() ||
+            outputs[size_t(v.points_output)].path != v.points_path) {
+            const auto found = std::find_if(outputs.begin(), outputs.end(), [&](const auto &p) { return p.path == v.points_path; });
+            v.points_output = found == outputs.end() ? -1 : int(found - outputs.begin());
+        }
+        if (v.points_output < 0 || outputs[size_t(v.points_output)].points.size() != size_t(v.source_count)) {
             _last_error = "Rig output point binding/count mismatch: " + String(v.points_path.c_str()); return false;
         }
+        const auto &output = outputs[size_t(v.points_output)];
         std::vector<Vector3> positions(v.stencils.size()), normals(v.stencils.size());
         auto apply = [&](const std::vector<Coefficient> &weights) {
             Vector3 result;
             for (const auto &w : weights) {
-                const auto &p = output->points[w.index];
+                const auto &p = output.points[w.index];
                 result += Vector3(p[0], p[1], p[2]) * w.weight;
             }
             return result;

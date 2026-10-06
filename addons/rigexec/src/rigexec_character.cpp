@@ -11,8 +11,8 @@ void RigExecCharacter::_bind_methods() {
                                 &RigExecCharacter::get_data);
     godot::ClassDB::bind_method(godot::D_METHOD("get_joint_paths"),
                                 &RigExecCharacter::get_joint_paths);
-    godot::ClassDB::bind_method(godot::D_METHOD("get_frame_times"),
-                                &RigExecCharacter::get_frame_times);
+    godot::ClassDB::bind_method(godot::D_METHOD("get_bake_time"),
+                                &RigExecCharacter::get_bake_time);
     godot::ClassDB::bind_method(godot::D_METHOD("bind"),
                                 &RigExecCharacter::bind);
     godot::ClassDB::bind_method(godot::D_METHOD("get_bind_error"),
@@ -29,7 +29,7 @@ void RigExecCharacter::set_data(const godot::PackedByteArray &data) {
     _bound = false;
     _bind_error = "";
     _joint_paths.clear();
-    _frame_times.clear();
+    _bake_time = 0.0;
 }
 
 godot::PackedByteArray RigExecCharacter::get_data() const {
@@ -40,13 +40,13 @@ godot::PackedStringArray RigExecCharacter::get_joint_paths() const {
     return _joint_paths;
 }
 
-godot::PackedFloat64Array RigExecCharacter::get_frame_times() const {
-    return _frame_times;
+double RigExecCharacter::get_bake_time() const {
+    return _bake_time;
 }
 
 bool RigExecCharacter::bind() {
     _joint_paths.clear();
-    _frame_times.clear();
+    _bake_time = 0.0;
     _bound = false;
     if (_data.is_empty()) {
         _bind_error = "no .rigexec data";
@@ -60,21 +60,17 @@ bool RigExecCharacter::bind() {
         _bind_error = godot::String(error.c_str());
         return false;
     }
-    // Joint paths need an evaluated frame; the binding pass runs the
-    // first baked frame and keeps the paths alone.
-    const std::vector<double> frames = reader->GetFrameTimes();
-    for (double frame : frames) {
-        _frame_times.push_back(frame);
-    }
-    if (!frames.empty() && reader->SetFrame(frames[0], &error) &&
-        reader->Execute(&error)) {
+    _bake_time = reader->GetBakeTime();
+    // Joint paths need an evaluation; the binding pass runs the input
+    // defaults and keeps the paths alone.
+    if (reader->Execute(&error)) {
         for (const rigExec::RigExecRuntimeJointMatrix &joint :
              reader->GetJointMatrices()) {
             _joint_paths.push_back(godot::String(joint.path.c_str()));
         }
     }
     // A file that opens but does not evaluate yet still binds: the player
-    // reports the per-frame reason when it evaluates for real.
+    // reports the reason when it evaluates for real.
     _bound = true;
     _bind_error = "";
     return true;

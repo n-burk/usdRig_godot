@@ -1,3 +1,5 @@
 * text=auto
 *.bat text eol=crlf
 *.sh text eol=lf
+*.rigexec binary
+*.rexp binary

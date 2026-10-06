@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Rebuild the tutorial rolling game using sibling usdRig and usd-install.
 
+Exports the presentation (mesh, stencils, material, controls), then bakes
+the program with it embedded, installs the addon, imports and verifies.
+
 python demo/setup_rolling.py --build   # compile debug + release, bake, import
 python demo/setup_rolling.py           # use existing native libraries
 """
@@ -43,9 +46,13 @@ def main():
     if os.name != "nt":
         env["LD_LIBRARY_PATH"] = os.pathsep.join([str(rig / "build"), str(usd / "lib"), env.get("LD_LIBRARY_PATH", "")])
     bake = rig / "build" / ("rigExecBake.exe" if os.name == "nt" else "rigExecBake")
-    subprocess.run([str(bake), str(rig / "docs/examples/tutorial_rolling_ball_free.usda"),
-                    "--frames", "1001", "-o", str(demo / "rolling_ball.rigexec")], env=env, check=True)
     subprocess.run([sys.executable, str(plugin / "tools/export_ball_assets.py")], env=env, check=True)
+    subprocess.run([str(bake), str(rig / "docs/examples/tutorial_rolling_ball_free.usda"), "--time", "1001",
+                    "--presentation", str(plugin / "build/rolling_ball/presentation.rexp"),
+                    "-o", str(demo / "rolling_ball.rigexec")], env=env, check=True)
+    # A stale source copy must not survive; bin stays so copy_changed can
+    # skip identical libraries a running editor holds open.
+    shutil.rmtree(demo / "addons/rigexec/src", ignore_errors=True)
     shutil.copytree(plugin / "addons/rigexec", demo / "addons/rigexec", dirs_exist_ok=True,
                     copy_function=copy_changed,
                     ignore=shutil.ignore_patterns("src", "*.obj", "*.lib", "*.exp", "*.pdb"))

@@ -1,8 +1,6 @@
 # SCons / compiler byproducts (never committed; CI rebuilds from scratch)
 .sconsign.dblite
 *.obj
-# Wavefront source mesh (not a compiler byproduct)
-!demo/ball_assets/tutorial_ball.obj
 *.exp
 *.lib
 *.pdb
@@ -17,7 +15,8 @@ addons/rigexec/bin/
 rigexec-addon.zip
 *.log
 
-# Regenerable demo intermediates (the setup scripts recreate these)
+# Regenerable intermediates: SCons objects (build/obj) and exporter
+# outputs (build/rolling_ball); the setup scripts recreate the demo ones
 build/
 demo/.godot/
 demo/addons/

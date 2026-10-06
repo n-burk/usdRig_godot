@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fresh-install gate (M4): the addon zip installs into an empty project.
+"""Fresh-install gate: the addon zip installs into an empty project.
 
 Builds rigexec-addon.zip via package_addon.py, unzips it into a scratch
 4.7 project holding only a .rigexec sample, imports, and headlessly
-loads, binds, and evaluates the character. Fails on any step.
+loads, binds, and evaluates the character at its input defaults. Fails
+on any step.
 
 Usage: check_install.py [godot_rigExec-dir] [sample.rigexec]
 Defaults: the script's parent dir and demo/fk.rigexec (run setup_demo
@@ -50,16 +51,16 @@ func _init() -> void:
 \t\treturn
 \tvar player := RigExecPlayer.new()
 \tplayer.set_character(character)
-\tvar frames := character.get_frame_times()
-\tplayer.set_frame(frames[0])
 \tif not player.evaluate():
 \t\tprint("INSTALL: evaluate failed: ", player.get_last_error())
+\t\tplayer.free()
 \t\tquit(1)
 \t\treturn
 \tvar transforms := player.get_joint_transforms()
 \tprint("INSTALL: ok: ", character.get_joint_paths().size(),
-\t\t" joints, ", frames.size(), " frames, ",
+\t\t" joints, ", player.get_inputs().size(), " inputs, ",
 \t\ttransforms.size(), " transforms")
+\tplayer.free()
 \tquit(0)
 """
 

@@ -2,8 +2,8 @@
 extends EditorImportPlugin
 
 # Editor-only .rigexec importer: reads the binary, binds it through the
-# runtime for validation, and saves a RigExecCharacter resource. Re-bake
-# shells out to the dev machine's rigExecBake (never shipped).
+# runtime for validation, and saves a RigExecCharacter resource. Baking
+# happens outside the editor (rigExecBake on a machine with USD).
 
 func _get_importer_name() -> String:
 	return "rigexec.character"
@@ -23,6 +23,13 @@ func _get_save_extension() -> String:
 
 func _get_resource_type() -> String:
 	return "RigExecCharacter"
+
+
+# Version 2 reads the single-FlatBuffer .rigexec. Bumping it re-imports
+# resources cached from older bytes, so a file that needs a rebake fails
+# at import with the runtime's reason rather than at play time.
+func _get_format_version() -> int:
+	return 2
 
 
 func _get_preset_count() -> int:

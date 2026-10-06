@@ -22,8 +22,8 @@ weightFields /TailAsset/Rig/Weights/Seg1W target=/TailAsset/Geom/TailStrip.point
 weightFields /TailAsset/Rig/Weights/Seg2W target=/TailAsset/Geom/TailStrip.points [10] 0 0.400000006 0.600000024 0.200000003 0 0 0.400000006 0.600000024 0.200000003 0
 weightFields /TailAsset/Rig/Weights/Seg3W target=/TailAsset/Geom/TailStrip.points [10] 0 0 0.200000003 0.600000024 0.300000012 0 0 0.200000003 0.600000024 0.300000012
 weightFields /TailAsset/Rig/Weights/Seg4W target=/TailAsset/Geom/TailStrip.points [10] 0 0 0 0.200000003 0.699999988 0 0 0 0.200000003 0.699999988
-diagnostic mover graph: 3 chain(s), 6 revision(s); 6 created, 6 executed, 3 schedule(s) built
-counters parityMismatches=0 parityAgreements=0 bakedParityMismatches=0 solverOverrideRounds=1 solverOverridesConverged=1 solverEvaluations=1 revisionsCreated=6 revisionsExecuted=6 schedulesBuilt=3
+diagnostic mover graph: 3 chain(s), 6 revision(s); 0 created, 6 executed, 0 schedule(s) built
+counters parityMismatches=0 parityAgreements=0 bakedParityMismatches=0 solverOverrideRounds=1 solverOverridesConverged=1 solverEvaluations=0 revisionsCreated=0 revisionsExecuted=6 schedulesBuilt=0
 frame 1002 valid=1
 jointFramesBase /TailAsset/Rig/Joints/Seg1 0 5 0 0.99982005654302319 5.0189663544038359 0.00036322848740069635 -0.018969832216072888 5.9996367556899619 0.019144245593447629 0 4.980852308904824 0.99981666615721299 flags=1
 jointFramesBase /TailAsset/Rig/Joints/Seg1/Seg2 1.9996401130860464 5.0379327088076726 0.00072645697480137883 2.9989204040174351 5.0758585918725885 0.0014527832284233766 1.961707275648275 6.0370297978433021 0.019860367303053617 1.9996401130860464 5.0187850177124966 1.0005431231320143 flags=1
@@ -49,4 +49,4 @@ weightFields /TailAsset/Rig/Weights/Seg2W target=/TailAsset/Geom/TailStrip.point
 weightFields /TailAsset/Rig/Weights/Seg3W target=/TailAsset/Geom/TailStrip.points [10] 0 0 0.200000003 0.600000024 0.300000012 0 0 0.200000003 0.600000024 0.300000012
 weightFields /TailAsset/Rig/Weights/Seg4W target=/TailAsset/Geom/TailStrip.points [10] 0 0 0 0.200000003 0.699999988 0 0 0 0.200000003 0.699999988
 diagnostic mover graph: 3 chain(s), 6 revision(s); 0 created, 6 executed, 0 schedule(s) built
-counters parityMismatches=0 parityAgreements=0 bakedParityMismatches=0 solverOverrideRounds=1 solverOverridesConverged=1 solverEvaluations=1 revisionsCreated=0 revisionsExecuted=6 schedulesBuilt=0
+counters parityMismatches=0 parityAgreements=0 bakedParityMismatches=0 solverOverrideRounds=1 solverOverridesConverged=1 solverEvaluations=0 revisionsCreated=0 revisionsExecuted=6 schedulesBuilt=0
