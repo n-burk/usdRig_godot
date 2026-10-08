@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Builds the rigExec GDExtension against godot-cpp.
 
-The zero-USD runtime (every rigExecRuntime source plus the rigExecBinary
-format reader) compiles from the sibling usdRig checkout straight into the
+The zero-USD runtime (rigExecRuntime, the portable operation graph compiler
+and executor, and the rigExecBinary format reader) compiles from the sibling usdRig checkout straight into the
 extension -- never a shared DLL. The FlatBuffers headers come from usdRig's
 thirdparty/flatbuffers/include. Objects go under build/obj/<suffix>, never
 into either source tree.
@@ -13,6 +13,7 @@ neither reassociates nor contracts multiply-adds.
 Usage:
     scons platform=<windows|linux|macos> target=<template_debug|template_release>
     scons platform=windows target=template_release api_version=4.7
+    scons platform=windows usdrig_root=<usdRig checkout or SDK source root>
 """
 
 import glob
@@ -35,13 +36,13 @@ def _godot_cpp_env():
 env = _godot_cpp_env()
 
 # The runtime compiles from the sibling usdRig checkout.
-usdrig_root = os.path.abspath(os.path.join("..", "usdRig"))
+usdrig_root = os.path.abspath(ARGUMENTS.get("usdrig_root", os.path.join("..", "usdRig")))
 usdrig_libs = os.path.join(usdrig_root, "libs")
 flatbuffers_include = os.path.join(usdrig_root, "thirdparty", "flatbuffers",
                                    "include")
 if not os.path.isfile(os.path.join(flatbuffers_include, "flatbuffers",
                                    "flatbuffers.h")):
-    print("../usdRig has no thirdparty/flatbuffers; check out a usdRig "
+    print(usdrig_root + " has no thirdparty/flatbuffers; check out a usdRig "
           "with the FlatBuffer .rigexec format")
     raise SystemExit(1)
 env.Append(CPPPATH=[usdrig_libs, flatbuffers_include])
@@ -52,16 +53,21 @@ if env.get("is_msvc", False):
 else:
     env.Append(CXXFLAGS=["-fno-fast-math", "-ffp-contract=off", "-std=c++17"])
 
-# Every runtime .cpp plus the format reader, globbed so the list follows
-# usdRig. generated/ holds headers only.
+# Runtime .cpp files plus the format reader and portable graph. Other
+# rigExecGraph sources require USD and do not enter this extension.
 runtime_sources = sorted(
     glob.glob(os.path.join(usdrig_libs, "rigExecRuntime", "*.cpp")))
 format_source = os.path.join(usdrig_libs, "rigExecBinary", "format.cpp")
-if not runtime_sources or not os.path.isfile(format_source):
-    print("no rigExecRuntime sources or rigExecBinary/format.cpp under " +
-          usdrig_libs)
+transport_source = os.path.join(usdrig_libs, "rigExecBinary", "transport.cpp")
+lzma_dir = os.path.join(usdrig_root, "third_party", "lzma", "C")
+lzma_sources = [os.path.join(lzma_dir, name) for name in
+                ("LzmaEnc.c", "LzmaDec.c", "LzFind.c", "CpuArch.c")]
+env.Append(CPPPATH=[lzma_dir])
+graph_source = os.path.join(usdrig_libs, "rigExecGraph", "opGraph.cpp")
+if not runtime_sources or not all(os.path.isfile(source) for source in (format_source, transport_source, graph_source, *lzma_sources)):
+    print("missing runtime, format reader, or portable operation graph sources under " + usdrig_libs)
     raise SystemExit(1)
-runtime_sources.append(format_source)
+runtime_sources.extend((format_source, transport_source, graph_source))
 addon_sources = sorted(glob.glob(os.path.join("addons", "rigexec", "src",
                                               "*.cpp")))
 
@@ -74,6 +80,11 @@ objects = [
                      os.path.splitext(os.path.relpath(s, usdrig_libs))[0]), s)
     for s in runtime_sources
 ]
+lzma_env = env.Clone()
+lzma_env.Append(CPPDEFINES=["Z7_ST", "RIGEXEC_LZMA_PORTABLE_SCALAR"])
+objects += [lzma_env.SharedObject(
+    os.path.join(obj_root, "lzma", os.path.splitext(os.path.basename(s))[0]), s)
+    for s in lzma_sources]
 objects += [
     env.SharedObject(
         os.path.join(obj_root, "addon",

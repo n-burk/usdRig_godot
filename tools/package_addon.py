@@ -29,6 +29,8 @@ TOP_FILES = (
     "LICENSE-OpenUSD.txt",
     "LICENSE-flatbuffers.txt",
     "LICENSE-godot-cpp.md",
+    "LICENSE-LZMA-SDK.txt",
+    "NOTICE-LZMA-SDK.md",
 )
 
 # Files from the repository root, by their path inside the zip.

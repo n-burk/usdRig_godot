@@ -31,6 +31,11 @@ cd usdRig_godot
 scons platform=windows target=template_release api_version=4.7
 ```
 
+For a checkout elsewhere, pass `usdrig_root=<path>` to SCons. That root
+must contain `libs/rigExecRuntime`, `libs/rigExecGraph`, `libs/rigExecBinary`
+and `thirdparty/flatbuffers/include`; the extension builds the runtime,
+format reader and portable operation graph together.
+
 `thirdparty/godot-cpp` is a submodule pinned to master @ `507ed9d`.
 Linux and macOS use the same command with their platform; the
 `.gdextension` already lists all three library paths. The FlatBuffers

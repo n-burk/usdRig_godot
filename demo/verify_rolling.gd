@@ -103,11 +103,37 @@ func run() -> void:
 	var cleared: Transform3D = player.get_joint_pose_transforms()[tip]
 	check(close_basis(cleared.basis, neutral.basis) and cleared.origin.distance_to(neutral.origin) < 0.0001, "reset restores the bake-time defaults")
 	check(player.get_child_count(true) == 1, "one internal render node, no skeleton hierarchy")
+	# Compressed files use mutations made by the official SDK codec, which
+	# rebuilds the outer checksum before either inner rejection is tested.
+	# Raw files retain the original direct-mutation path when no option is supplied.
+	var fixture_root := ""
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--codec-inner-fixtures="):
+			fixture_root = argument.trim_prefix("--codec-inner-fixtures=")
+	var fixture_manifest: Dictionary = {}
+	if not fixture_root.is_empty():
+		var parsed = JSON.parse_string(FileAccess.get_file_as_string(fixture_root.path_join("manifest.json")))
+		var valid: bool = parsed is Dictionary and parsed.get("source_sha256", "") == FileAccess.get_sha256("res://rolling_ball.rigexec")
+		valid = valid and parsed.get("official_codec_roundtrip", false) == true and parsed.get("bad_presentation_strict_open", true) == false and parsed.get("unsupported_model_strict_open", false) == true
+		valid = valid and parsed.get("fixtures_sha256", {}) is Dictionary
+		if valid:
+			for name in ["bad_presentation.rigexec", "unsupported_model.rigexec"]:
+				var expected_sha: String = str(parsed.get("fixtures_sha256", {}).get(name, ""))
+				valid = valid and expected_sha.length() == 64 and FileAccess.file_exists(fixture_root.path_join(name)) and expected_sha == FileAccess.get_sha256(fixture_root.path_join(name))
+		check(valid, "official codec inner fixtures match the exact character and payload hashes")
+		if not valid:
+			quit(1)
+			return
+		fixture_manifest = parsed
 	# A broken nested buffer: the runtime's open refuses the file.
 	var bad_bytes := character.get_data().duplicate()
 	var identifier := nested_presentation_identifier(bad_bytes)
-	if identifier >= 0:
-		bad_bytes[identifier] = 0x58 # "REXP" -> "XEXP"
+	if fixture_manifest.is_empty():
+		if identifier >= 0:
+			bad_bytes[identifier] = 0x58 # "REXP" -> "XEXP"
+	else:
+		bad_bytes = FileAccess.get_file_as_bytes(fixture_root.path_join("bad_presentation.rigexec"))
+		identifier = int(fixture_manifest.get("presentation_identifier_offset", -1))
 	var bad_character := RigExecCharacter.new()
 	bad_character.set_data(bad_bytes)
 	player.set_character(bad_character)
@@ -116,8 +142,12 @@ func run() -> void:
 	# opens, and the loader refuses it.
 	bad_bytes = character.get_data().duplicate()
 	var model := ascii_offset(bad_bytes, "UsdPreviewSurface")
-	if model >= 0:
-		bad_bytes[model] = 0x58 # "UsdPreviewSurface" -> "XsdPreviewSurface"
+	if fixture_manifest.is_empty():
+		if model >= 0:
+			bad_bytes[model] = 0x58 # "UsdPreviewSurface" -> "XsdPreviewSurface"
+	else:
+		bad_bytes = FileAccess.get_file_as_bytes(fixture_root.path_join("unsupported_model.rigexec"))
+		model = int(fixture_manifest.get("material_model_offset", -1))
 	bad_character = RigExecCharacter.new()
 	bad_character.set_data(bad_bytes)
 	player.set_character(bad_character)

@@ -23,6 +23,11 @@ Requires the usdRig checkout beside this one (`../usdRig`), godot-cpp at
 scons platform=windows target=template_release api_version=4.7
 ```
 
+For a checkout elsewhere, pass `usdrig_root=<path>` to SCons. That root
+must contain `libs/rigExecRuntime`, `libs/rigExecGraph`, `libs/rigExecBinary`
+and `thirdparty/flatbuffers/include`; the extension builds the runtime,
+format reader and portable operation graph together.
+
 Linux and macOS use the same command with their platform; the
 `.gdextension` already lists all three library paths. The FlatBuffers
 headers come from `../usdRig/thirdparty/flatbuffers/include`, and objects

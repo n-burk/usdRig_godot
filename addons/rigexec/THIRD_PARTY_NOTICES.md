@@ -14,3 +14,7 @@ terms (`LICENSE`).
 - **godot-cpp** (Godot Engine contributors, MIT License; see
   `LICENSE-godot-cpp.md`), the GDExtension C++ bindings the libraries are
   built with.
+
+- **LZMA SDK 26.04** (Igor Pavlov, public domain; see
+  `LICENSE-LZMA-SDK.txt` and `NOTICE-LZMA-SDK.md`). The single-threaded
+  scalar codec reads the compressed `.rigexec` transport without USD.

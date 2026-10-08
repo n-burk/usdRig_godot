@@ -98,14 +98,14 @@ bool RigExecPlayer::_load_presentation() {
     auto fail = [&](const String &reason) {
         _clear_presentation(); _last_error = "Invalid embedded presentation: " + reason; return false;
     };
-    // The reader opened _data, which verified the file's root and bounded
-    // and verified its nested presentation.
-    const rigExec::fb::File *file = rigExec::fb::GetFile(_data.ptr());
-    const flatbuffers::Vector<uint8_t> *nested = file->presentation();
-    if (!nested || nested->size() == 0) return true;
-    // An owned copy keeps every read aligned whatever the byte array's
-    // alignment; it is verified again on its own.
-    const std::vector<uint8_t> buffer(nested->data(), nested->data() + nested->size());
+    // _data may be compressed transport bytes. Open through the format
+    // decoder before inspecting the owned, validated presentation payload.
+    std::unique_ptr<rigExec::fb::RigExecWireFile> file;
+    std::string why;
+    if (!rigExec::RigExecFormatOpen(_data.ptr(), _data.size(), &file, &why))
+        return fail(String::utf8(why.c_str()));
+    const std::vector<uint8_t> &buffer = file->presentation;
+    if (buffer.empty()) return true;
     flatbuffers::Verifier verifier(buffer.data(), buffer.size());
     if (!rigExec::fb::VerifyPresentationBuffer(verifier)) return fail("REXP buffer");
     const rigExec::fb::Presentation *asset = rigExec::fb::GetPresentation(buffer.data());
