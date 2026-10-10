@@ -1,7 +1,7 @@
 [remap]
 
 importer="rigexec.character"
-importer_version=2
+importer_version=3
 type="RigExecCharacter"
 uid="uid://cihj075nkgkjs"
 path="res://.godot/imported/fk.rigexec-bd9fbda70c94fa26b5516ef5f4d77de4.res"

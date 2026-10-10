@@ -25,11 +25,12 @@ func _get_resource_type() -> String:
 	return "RigExecCharacter"
 
 
-# Version 2 reads the single-FlatBuffer .rigexec. Bumping it re-imports
-# resources cached from older bytes, so a file that needs a rebake fails
-# at import with the runtime's reason rather than at play time.
+# Version 3 reads .rigexec format 21 (usdRig v0.1.0; format 20 still
+# opens). Bumping it re-imports resources cached from older bytes, so a
+# file that needs a rebake fails at import with the runtime's reason
+# rather than at play time.
 func _get_format_version() -> int:
-	return 2
+	return 3
 
 
 func _get_preset_count() -> int:
